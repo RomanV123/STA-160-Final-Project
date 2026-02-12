@@ -1,10 +1,4 @@
-Perfect. This is where you move from “I ran some code” to “this is a reproducible research pipeline.”
 
-Below is a detailed, clean README you can include in your project folder or submit with your code. It explains what the project does, how to run it, and how it connects to your research question.
-
-You can copy this directly into a `README.md` file.
-
----
 
 # README
 
