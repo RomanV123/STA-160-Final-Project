@@ -83,10 +83,22 @@ print(log_returns.head())
 print("Number of firms (columns):", log_returns.shape[1])
 print("Number of observations (rows):", log_returns.shape[0])
 
-# Remove firms with excessive missing observations (e.g., IPOs)
-# Drop columns with more than 10% missing values
-missing_threshold = 0.10
-missing_pct = log_returns.isna().sum() / len(log_returns)
+# Data Cleaning: Remove firms with excessive missing observations
+# ----------------------------------------------------------------------------
+# What we're searching for: Stocks with too much missing data that would 
+# compromise correlation calculations. Missing data can occur due to:
+# - IPOs during our time period (stock didn't exist for full period)
+# - Delistings (stock removed from S&P 500)
+# - Trading halts or data errors
+#
+# What we're doing: Calculating the percentage of missing values for each 
+# stock, then removing stocks with more than 10% missing data. This ensures 
+# we have sufficient data points to compute reliable correlations.
+#
+# Expected result: Most S&P 500 stocks should have <10% missing data, 
+# so we'll drop only a few problematic stocks
+missing_threshold = 0.10  # 10% missing data threshold
+missing_pct = log_returns.isna().sum() / len(log_returns)  # % missing per stock
 firms_to_drop = missing_pct[missing_pct > missing_threshold].index
 log_returns = log_returns.drop(columns=firms_to_drop)
 
@@ -94,35 +106,83 @@ print(f"\nDropped {len(firms_to_drop)} firms with >{missing_threshold*100}% miss
 print(f"Remaining firms: {log_returns.shape[1]}")
 
 # Drop any remaining rows with NaN values
+# What we're doing: After removing problematic stocks, remove any days that 
+# still have missing values. This ensures we have a complete matrix for 
+# correlation calculations (all stocks have returns for all remaining days).
 log_returns = log_returns.dropna()
 
 print(f"Final data shape: {log_returns.shape}")
+# Result: Clean matrix with no missing values - ready for correlation analysis
 
 # ============================================================================
 # Step 4: Exploratory Data Analysis (EDA)
 # ============================================================================
+# Purpose: Understand the distribution and relationships in our return data
+# before building the correlation network. We want to verify:
+# 1. Returns follow expected patterns (near-zero mean, symmetric distribution)
+# 2. Stocks exhibit meaningful correlation structure (not random)
+# 3. Data quality is sufficient for network analysis
 
 print("\n" + "="*80)
 print("STEP 4: EXPLORATORY DATA ANALYSIS")
 print("="*80)
 
-# 1. Summary statistics of returns (mean, standard deviation, min, max)
+# 1. Summary Statistics of Returns
+# ----------------------------------------------------------------------------
+# What we're searching for: Understanding the central tendency, spread, and 
+# extreme values of daily log returns across all stocks in our dataset.
+# 
+# What we're doing: Computing descriptive statistics for each stock's return 
+# series, then aggregating across all stocks to get overall market statistics.
+#
+# Expected findings:
+# - Mean return should be close to zero (daily returns average out over time)
+# - Standard deviation shows volatility (typically 0.01-0.03 for daily returns)
+# - Min/max show extreme daily moves (crashes/rallies)
 print("\n1. Summary Statistics of Returns:")
 print("-" * 80)
+# Compute per-stock statistics: count, mean, std, min, 25th/50th/75th percentile, max
 summary_stats = log_returns.describe()
 print(summary_stats)
 
 # Additional summary statistics
+# What we're doing: Flattening all returns into a single array to get 
+# market-wide statistics across all stocks and all days.
+# This tells us: How does the ENTIRE market behave on average?
 print("\nAdditional Summary Statistics:")
-print(f"Overall mean return: {log_returns.values.mean():.6f}")
-print(f"Overall std deviation: {log_returns.values.std():.6f}")
-print(f"Overall min return: {log_returns.values.min():.6f}")
-print(f"Overall max return: {log_returns.values.max():.6f}")
+overall_mean = log_returns.values.mean()
+overall_std = log_returns.values.std()
+overall_min = log_returns.values.min()
+overall_max = log_returns.values.max()
+print(f"Overall mean return: {overall_mean:.6f}")
+print(f"Overall std deviation: {overall_std:.6f}")
+print(f"Overall min return: {overall_min:.6f}")
+print(f"Overall max return: {overall_max:.6f}")
+# Interpretation: 
+# - Mean near 0 indicates no systematic bias (efficient market hypothesis)
+# - Std dev shows typical daily volatility (e.g., 0.015 = 1.5% daily volatility)
+# - Min/max show worst single-day losses and best single-day gains
 
-# 2. Histogram of daily returns
+# 2. Histogram of Daily Returns
+# ----------------------------------------------------------------------------
+# What we're searching for: The shape of the return distribution across all 
+# stocks and all days. We want to verify:
+# - Returns are approximately normally distributed (bell curve)
+# - Distribution is centered near zero
+# - Presence of "fat tails" (extreme events more common than normal distribution)
+#
+# What we're doing: Flattening all return data into a single array and 
+# creating a histogram to visualize the frequency distribution.
+#
+# Expected findings:
+# - Bell-shaped curve centered near zero
+# - Fat tails (more extreme values than normal distribution would predict)
+# - This confirms returns follow patterns suitable for correlation analysis
 print("\n2. Creating histogram of daily returns...")
 plt.figure(figsize=(12, 6))
-plt.hist(log_returns.values.flatten(), bins=100, edgecolor='black', alpha=0.7)
+# Flatten all returns: convert 2D array (days × stocks) to 1D array
+all_returns = log_returns.values.flatten()
+plt.hist(all_returns, bins=100, edgecolor='black', alpha=0.7)
 plt.xlabel('Daily Log Return', fontsize=12)
 plt.ylabel('Frequency', fontsize=12)
 plt.title('Distribution of Daily Log Returns (All Stocks)', fontsize=14, fontweight='bold')
@@ -131,11 +191,36 @@ plt.tight_layout()
 plt.savefig('histogram_daily_returns.png', dpi=300, bbox_inches='tight')
 print("Saved: histogram_daily_returns.png")
 plt.close()
+# Interpretation: 
+# - If bell-shaped: returns follow expected statistical patterns
+# - If centered at zero: no systematic bias in market
+# - Fat tails indicate market crashes/booms are more common than normal distribution predicts
 
-# 3. Correlation matrix heatmap
+# 3. Correlation Matrix Heatmap
+# ----------------------------------------------------------------------------
+# What we're searching for: Visual patterns in how stocks move together.
+# We want to identify:
+# - Clusters of highly correlated stocks (sectors that move together)
+# - Overall correlation level (are stocks generally correlated or independent?)
+# - Block structure (groups of stocks with similar correlation patterns)
+#
+# What we're doing: Computing Pearson correlation coefficient between every 
+# pair of stocks' return series. Correlation ranges from -1 (perfect negative)
+# to +1 (perfect positive), with 0 meaning no linear relationship.
+# Formula: corr(X,Y) = covariance(X,Y) / (std(X) * std(Y))
+#
+# Expected findings:
+# - Most correlations are positive (stocks tend to move together)
+# - Correlations typically range from 0.2 to 0.8 for stocks in same sector
+# - Diagonal is always 1.0 (stock perfectly correlated with itself)
 print("\n3. Computing correlation matrix and creating heatmap...")
-# Compute correlation matrix
+# Compute correlation matrix: N×N matrix where entry (i,j) is correlation 
+# between stock i and stock j's daily returns over entire time period
 corr_matrix = log_returns.corr()
+# Result: Each cell shows how similarly two stocks' returns move together
+# Values close to 1: stocks move together (both up or both down)
+# Values close to 0: stocks move independently
+# Values close to -1: stocks move oppositely (one up when other down)
 
 # Create heatmap (sample for visualization - full matrix is too large)
 # For visualization, we'll show a sample or use a smaller subset
@@ -146,10 +231,10 @@ corr_sample = corr_matrix.loc[sample_tickers, sample_tickers]
 
 plt.figure(figsize=(14, 12))
 sns.heatmap(corr_sample, 
-            cmap='coolwarm', 
-            center=0,
-            vmin=-1, 
-            vmax=1,
+            cmap='coolwarm',  # Blue = negative, Red = positive correlation
+            center=0,          # White at zero correlation
+            vmin=-1,          # Minimum correlation value
+            vmax=1,           # Maximum correlation value
             square=True,
             cbar_kws={'label': 'Correlation'},
             xticklabels=False,
@@ -160,12 +245,37 @@ plt.tight_layout()
 plt.savefig('correlation_heatmap.png', dpi=300, bbox_inches='tight')
 print(f"Saved: correlation_heatmap.png (showing first {n_sample} stocks)")
 plt.close()
+# Interpretation:
+# - Red/white blocks: groups of stocks that move together (likely same sector)
+# - Overall red tint: positive average correlation (market moves together)
+# - Dark red squares: highly correlated pairs (e.g., tech stocks together)
+# - This visualization confirms stocks form clusters, validating network approach
 
-# 4. Distribution of pairwise correlations
+# 4. Distribution of Pairwise Correlations
+# ----------------------------------------------------------------------------
+# What we're searching for: Understanding the overall correlation structure 
+# of the market. We want to know:
+# - What is the average correlation between any two stocks?
+# - Are most stock pairs correlated or independent?
+# - How spread out are correlations? (tight distribution vs. wide range)
+#
+# What we're doing: Extracting all unique pairwise correlations from the 
+# correlation matrix (excluding diagonal and duplicates). For N stocks, 
+# we get N*(N-1)/2 unique pairs. Then we analyze the distribution of these 
+# correlation values.
+#
+# Expected findings:
+# - Mean correlation typically 0.3-0.6 (stocks move together, not independently)
+# - Distribution shifted right (more positive correlations than negative)
+# - This confirms market has structure suitable for network analysis
 print("\n4. Creating distribution of pairwise correlations...")
 # Extract upper triangle of correlation matrix (excluding diagonal)
-mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+# Why upper triangle? Correlation matrix is symmetric (corr(A,B) = corr(B,A))
+# and diagonal is always 1.0 (stock perfectly correlated with itself)
+# So we only need unique pairs: N*(N-1)/2 correlations instead of N*N
+mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)  # Upper triangle, skip diagonal
 pairwise_corrs = corr_matrix.where(mask).stack().values
+# Result: Array of all unique pairwise correlations (typically ~125,000 pairs for 500 stocks)
 
 plt.figure(figsize=(12, 6))
 plt.hist(pairwise_corrs, bins=100, edgecolor='black', alpha=0.7, color='steelblue')
@@ -173,24 +283,47 @@ plt.xlabel('Pairwise Correlation', fontsize=12)
 plt.ylabel('Frequency', fontsize=12)
 plt.title('Distribution of Pairwise Stock Return Correlations', fontsize=14, fontweight='bold')
 plt.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero Correlation')
-plt.axvline(x=pairwise_corrs.mean(), color='green', linestyle='--', linewidth=2, 
-            label=f'Mean: {pairwise_corrs.mean():.3f}')
+mean_corr = pairwise_corrs.mean()
+plt.axvline(x=mean_corr, color='green', linestyle='--', linewidth=2, 
+            label=f'Mean: {mean_corr:.3f}')
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig('distribution_pairwise_correlations.png', dpi=300, bbox_inches='tight')
 print("Saved: distribution_pairwise_correlations.png")
 plt.close()
+# Interpretation:
+# - If distribution is right-shifted (mean > 0): stocks generally move together
+# - Mean around 0.3-0.6: moderate positive correlation (market comovement)
+# - If mean near 0: stocks move independently (unlikely for S&P 500)
+# - Wide spread: some pairs highly correlated (same sector), others less so
 
 # Print correlation distribution statistics
+# What these numbers tell us:
+# - Mean: Average correlation between any two stocks (market-wide comovement)
+# - Median: Middle value (50% of pairs have correlation above this)
+# - Std Dev: How spread out correlations are (wide = diverse relationships)
+# - Min/Max: Most negatively and positively correlated pairs
+# - Percentiles: Distribution shape (e.g., 75th percentile = 75% of pairs below this)
 print("\nPairwise Correlation Statistics:")
-print(f"  Mean: {pairwise_corrs.mean():.4f}")
-print(f"  Median: {np.median(pairwise_corrs):.4f}")
-print(f"  Std Dev: {pairwise_corrs.std():.4f}")
-print(f"  Min: {pairwise_corrs.min():.4f}")
-print(f"  Max: {pairwise_corrs.max():.4f}")
-print(f"  25th percentile: {np.percentile(pairwise_corrs, 25):.4f}")
-print(f"  75th percentile: {np.percentile(pairwise_corrs, 75):.4f}")
+mean_val = pairwise_corrs.mean()
+median_val = np.median(pairwise_corrs)
+std_val = pairwise_corrs.std()
+min_val = pairwise_corrs.min()
+max_val = pairwise_corrs.max()
+p25 = np.percentile(pairwise_corrs, 25)
+p75 = np.percentile(pairwise_corrs, 75)
+print(f"  Mean: {mean_val:.4f}")  # Average correlation: typically 0.3-0.6 for S&P 500
+print(f"  Median: {median_val:.4f}")  # Middle value: shows if distribution is symmetric
+print(f"  Std Dev: {std_val:.4f}")  # Spread: higher = more diverse correlation patterns
+print(f"  Min: {min_val:.4f}")  # Most negative correlation (stocks that move oppositely)
+print(f"  Max: {max_val:.4f}")  # Most positive correlation (stocks that move together)
+print(f"  25th percentile: {p25:.4f}")  # 25% of pairs have correlation below this
+print(f"  75th percentile: {p75:.4f}")  # 75% of pairs have correlation below this
+# Interpretation:
+# - Mean > 0.3: Confirms market has meaningful correlation structure
+# - Positive mean: Stocks tend to move together (systematic risk)
+# - This validates our approach: we can build a meaningful correlation network
 
 print("\n" + "="*80)
 print("EDA Complete! This confirms that the market exhibits meaningful correlation structure.")
