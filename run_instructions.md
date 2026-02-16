@@ -19,7 +19,7 @@ python3 -m pip install yfinance pandas numpy matplotlib seaborn requests
 Navigate to the project directory and run:
 
 ```bash
-cd /Users/shotaruo/STA-160-Final-Project
+cd /Users/shotaruo/STA-160-Final-Project #change the shotaruo to like your directory folder
 python3 "STA 160 Final Project.py"
 ```
 

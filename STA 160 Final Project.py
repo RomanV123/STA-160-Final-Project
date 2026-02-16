@@ -268,51 +268,92 @@ plt.close()
 # - Mean correlation typically 0.3-0.6 (stocks move together, not independently)
 # - Distribution shifted right (more positive correlations than negative)
 # - This confirms market has structure suitable for network analysis
+# 4. Distribution of Pairwise Correlations
+# ----------------------------------------------------------------------------
 print("\n4. Creating distribution of pairwise correlations...")
-# Extract upper triangle of correlation matrix (excluding diagonal)
-# Why upper triangle? Correlation matrix is symmetric (corr(A,B) = corr(B,A))
-# and diagonal is always 1.0 (stock perfectly correlated with itself)
-# So we only need unique pairs: N*(N-1)/2 correlations instead of N*N
-mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)  # Upper triangle, skip diagonal
-pairwise_corrs = corr_matrix.where(mask).stack().values
-# Result: Array of all unique pairwise correlations (typically ~125,000 pairs for 500 stocks)
 
-plt.figure(figsize=(12, 6))
-plt.hist(pairwise_corrs, bins=100, edgecolor='black', alpha=0.7, color='steelblue')
-plt.xlabel('Pairwise Correlation', fontsize=12)
-plt.ylabel('Frequency', fontsize=12)
-plt.title('Distribution of Pairwise Stock Return Correlations', fontsize=14, fontweight='bold')
-plt.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero Correlation')
-mean_corr = pairwise_corrs.mean()
-plt.axvline(x=mean_corr, color='green', linestyle='--', linewidth=2, 
-            label=f'Mean: {mean_corr:.3f}')
-plt.legend()
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.savefig('distribution_pairwise_correlations.png', dpi=300, bbox_inches='tight')
-print("Saved: distribution_pairwise_correlations.png")
-plt.close()
-# Interpretation:
-# - If distribution is right-shifted (mean > 0): stocks generally move together
-# - Mean around 0.3-0.6: moderate positive correlation (market comovement)
-# - If mean near 0: stocks move independently (unlikely for S&P 500)
-# - Wide spread: some pairs highly correlated (same sector), others less so
+# Recompute correlation matrix (safe)
+corr_matrix = log_returns.corr()
 
-# Print correlation distribution statistics
-# What these numbers tell us:
-# - Mean: Average correlation between any two stocks (market-wide comovement)
-# - Median: Middle value (50% of pairs have correlation above this)
-# - Std Dev: How spread out correlations are (wide = diverse relationships)
-# - Min/Max: Most negatively and positively correlated pairs
-# - Percentiles: Distribution shape (e.g., 75th percentile = 75% of pairs below this)
-print("\nPairwise Correlation Statistics:")
-mean_val = pairwise_corrs.mean()
-median_val = np.median(pairwise_corrs)
-std_val = pairwise_corrs.std()
-min_val = pairwise_corrs.min()
-max_val = pairwise_corrs.max()
-p25 = np.percentile(pairwise_corrs, 25)
-p75 = np.percentile(pairwise_corrs, 75)
+# Convert to numpy array
+corr_values = corr_matrix.values
+
+# Extract upper triangle (exclude diagonal)
+n = corr_values.shape[0]
+pairwise_corrs = corr_values[np.triu_indices(n, k=1)]
+
+# Remove NaNs
+pairwise_corrs = pairwise_corrs[~np.isnan(pairwise_corrs)]
+
+print("Number of pairwise correlations:", len(pairwise_corrs))
+
+# Safety check
+if len(pairwise_corrs) == 0:
+    print("ERROR: No valid pairwise correlations found.")
+else:
+    # ------------------------------
+    # Create histogram
+    # ------------------------------
+    plt.figure(figsize=(12, 6))
+
+    plt.hist(pairwise_corrs,
+             bins=100,
+             edgecolor='black',
+             alpha=0.7)
+
+    plt.xlabel('Pairwise Correlation', fontsize=12)
+    plt.ylabel('Frequency', fontsize=12)
+    plt.title('Distribution of Pairwise Stock Return Correlations',
+              fontsize=14, fontweight='bold')
+
+    # Add zero line
+    plt.axvline(x=0,
+                color='red',
+                linestyle='--',
+                linewidth=2,
+                label='Zero Correlation')
+
+    # Add mean line
+    mean_corr = np.mean(pairwise_corrs)
+    plt.axvline(x=mean_corr,
+                color='green',
+                linestyle='--',
+                linewidth=2,
+                label=f'Mean: {mean_corr:.3f}')
+
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig('distribution_pairwise_correlations.png',
+                dpi=300,
+                bbox_inches='tight')
+
+    print("Saved: distribution_pairwise_correlations.png")
+    plt.close()
+
+    # ------------------------------
+    # Print statistics
+    # ------------------------------
+    print("\nPairwise Correlation Statistics:")
+
+    mean_val = np.mean(pairwise_corrs)
+    median_val = np.median(pairwise_corrs)
+    std_val = np.std(pairwise_corrs)
+    min_val = np.min(pairwise_corrs)
+    max_val = np.max(pairwise_corrs)
+    p25 = np.percentile(pairwise_corrs, 25)
+    p75 = np.percentile(pairwise_corrs, 75)
+
+    print(f"  Mean: {mean_val:.4f}")
+    print(f"  Median: {median_val:.4f}")
+    print(f"  Std Dev: {std_val:.4f}")
+    print(f"  Min: {min_val:.4f}")
+    print(f"  Max: {max_val:.4f}")
+    print(f"  25th percentile: {p25:.4f}")
+    print(f"  75th percentile: {p75:.4f}")
+
+
 print(f"  Mean: {mean_val:.4f}")  # Average correlation: typically 0.3-0.6 for S&P 500
 print(f"  Median: {median_val:.4f}")  # Middle value: shows if distribution is symmetric
 print(f"  Std Dev: {std_val:.4f}")  # Spread: higher = more diverse correlation patterns
