@@ -1,7 +1,11 @@
+from sklearn.model_selection import train_test_split
 import yfinance as yf
 import pandas as pd
 import requests
 import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
 from io import StringIO
@@ -23,6 +27,9 @@ html_io = StringIO(response.text)
 tables = pd.read_html(html_io, header=0)
     
 sp500_table = tables[0]  # First table is the S&P 500 constituents
+sectors = sp500_table[['Symbol', 'GICS Sector']].copy()
+sectors['Symbol'] = sectors['Symbol'].str.replace('.', '-', regex=False)
+sectors = sectors.set_index('Symbol')
 print("Successfully parsed S&P 500 table!")
 
 print(sp500_table.head())
@@ -229,6 +236,8 @@ n_sample = min(50, corr_matrix.shape[0])
 sample_tickers = corr_matrix.index[:n_sample]
 corr_sample = corr_matrix.loc[sample_tickers, sample_tickers]
 
+
+
 plt.figure(figsize=(14, 12))
 sns.heatmap(corr_sample, 
             cmap='coolwarm',  # Blue = negative, Red = positive correlation
@@ -245,6 +254,8 @@ plt.tight_layout()
 plt.savefig('correlation_heatmap.png', dpi=300, bbox_inches='tight')
 print(f"Saved: correlation_heatmap.png (showing first {n_sample} stocks)")
 plt.close()
+
+
 # Interpretation:
 # - Red/white blocks: groups of stocks that move together (likely same sector)
 # - Overall red tint: positive average correlation (market moves together)
@@ -369,3 +380,421 @@ print(f"  75th percentile: {p75:.4f}")  # 75% of pairs have correlation below th
 print("\n" + "="*80)
 print("EDA Complete! This confirms that the market exhibits meaningful correlation structure.")
 print("="*80)
+
+
+# Sector-level correlation heatmap
+# Join returns with sector labels
+sectors_aligned = sectors.reindex(log_returns.columns).dropna()
+
+# Compute mean return per sector per day
+sector_returns = (
+    log_returns[sectors_aligned.index]
+    .T
+    .assign(sector=sectors_aligned['GICS Sector'].values)
+    .groupby('sector')
+    .mean()
+    .T
+)
+
+# Compute sector-level correlation matrix
+sector_corr = sector_returns.corr()
+
+plt.figure(figsize=(12, 10))
+sns.heatmap(
+    sector_corr,
+    cmap='coolwarm',
+    center=0,
+    vmin=-1,
+    vmax=1,
+    annot=True,          # show correlation values in each cell
+    fmt='.2f',
+    square=True,
+    cbar_kws={'label': 'Correlation'},
+    xticklabels=True,
+    yticklabels=True
+)
+plt.title('Sector-Level Return Correlation Heatmap', fontsize=14, fontweight='bold')
+plt.xticks(rotation=45, ha='right', fontsize=9)
+plt.yticks(rotation=0, fontsize=9)
+plt.tight_layout()
+plt.savefig('sector_correlation_heatmap.png', dpi=300, bbox_inches='tight')
+print("Saved: sector_correlation_heatmap.png")
+plt.close()
+
+#Step 5: Build Correlation Network
+
+# Step 5: Build Correlation Network
+corr_matrix = log_returns.corr()
+adjacency = corr_matrix.abs().to_numpy().copy()
+np.fill_diagonal(adjacency, 0)
+
+print("Adjacency matrix shape:", adjacency.shape)
+print("Diagonal sum (should be 0):", np.diag(adjacency).sum())
+print("Min value (should be >=0):", adjacency.min())
+print("Max value (should be <=1):", adjacency.max())
+
+print("Adjacency matrix shape:", adjacency.shape)
+print("Diagonal sum (should be 0):", np.diag(adjacency).sum())
+print("Min value (should be >=0):", adjacency.min())
+print("Max value (should be <=1):", adjacency.max())
+
+tech_ticker = sectors[sectors['GICS Sector'] == 'Information Technology'].index
+tech_ticker = [t for t in tech_ticker if t in log_returns.columns]
+tech_corr = log_returns[tech_ticker].corr()
+plt.figure(figsize=(18, 16))
+sns.heatmap(
+    tech_corr,
+    cmap='coolwarm',
+    center=0,
+    vmin=-1,
+    vmax=1,
+    annot=True,          # show correlation values in each cell
+    fmt='.2f',
+    square=True,
+    cbar_kws={'label': 'Correlation'},
+    xticklabels=True,
+    yticklabels=True
+)
+plt.title('Information Technology Sector Correlation Heatmap', fontsize=14, fontweight='bold')
+
+# Tech sector vs all other sectors correlation heatmap
+sector_avg_returns = (
+    log_returns[sectors_aligned.index]
+    .T
+    .assign(sector=sectors_aligned['GICS Sector'].values)
+    .groupby('sector')
+    .mean()
+    .T
+)
+
+tech_vs_sectors = log_returns[tech_ticker].corrwith(sector_avg_returns.mean(axis=1))
+tech_sector_corr = pd.DataFrame({sector: log_returns[tech_ticker].corrwith(sector_avg_returns[sector]) for sector in sector_avg_returns.columns}
+)
+
+plt.figure(figsize=(16, 12))
+sns.heatmap(
+    tech_sector_corr,
+    cmap='coolwarm',
+    center=0,
+    vmin=-1,
+    vmax=1,
+    annot=False,
+    square=False,
+    cbar_kws={'label': 'Correlation'},
+    xticklabels=True,
+    yticklabels=True
+)
+plt.title('Tech Stocks vs All Sectors — Correlation Heatmap',
+          fontsize=14, fontweight='bold')
+plt.xticks(rotation=45, ha='right', fontsize=9)
+plt.yticks(rotation=0, fontsize=7)
+plt.tight_layout()
+plt.savefig('tech_vs_sectors_correlation_heatmap.png', dpi=300, bbox_inches='tight')
+print("Saved: tech_vs_sectors_correlation_heatmap.png")
+plt.close()
+
+plt.figure(figsize=(16, 12))
+sns.heatmap(
+    tech_corr,
+    cmap='coolwarm',
+    center=0,
+    vmin=-1,
+    vmax=1,
+    annot=False,
+    square=True,
+    cbar_kws={'label': 'Correlation'},
+    xticklabels=True,
+    yticklabels=True
+)
+plt.title('Information Technology Sector Correlation Heatmap', fontsize=14, fontweight='bold')
+plt.xticks(rotation=90, fontsize=7)
+plt.yticks(rotation=0, fontsize=7)
+plt.tight_layout()
+plt.savefig('tech_sector_correlation_heatmap.png', dpi=300, bbox_inches='tight')  
+print("Saved: tech_sector_correlation_heatmap.png")
+plt.close()  
+
+
+#Step 6
+
+# Step 6: Power Method for Eigenvector Centrality
+def power_method(A, max_iter=1000, tol=1e-6):
+    n = A.shape[0]
+    v = np.random.rand(n)
+    v = v / np.linalg.norm(v)
+    
+    for i in range(max_iter):
+        v_next = A @ v
+        v_next = v_next / np.linalg.norm(v_next)
+        if np.linalg.norm(v_next - v) < tol:
+            print(f"Converged after {i+1} iterations")
+            break
+        v = v_next
+    
+    eigenvalue = (v_next @ A @ v_next) / (v_next @ v_next)
+    return eigenvalue, v_next
+
+dominant_eigenvalue, dominant_eigenvector = power_method(adjacency)
+print(f"Dominant Eigenvalue: {dominant_eigenvalue:.4f}")
+
+# Store as Series with ticker labels
+centrality_series = pd.Series(dominant_eigenvector, index=log_returns.columns, name='centrality')
+print("\nTop 10 most central stocks:")
+print(centrality_series.sort_values(ascending=False).head(10))
+
+mag7 = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA']
+print("\nMag 7 Centrality Rankings:")
+print(centrality_series[mag7].sort_values(ascending=False))
+
+print(f"\nMag 7 average centrality rank out of {len(centrality_series)} stocks:")
+ranked = centrality_series.rank(ascending=False)
+print(ranked[mag7].sort_values())
+
+# Centrality for last year only (2025)
+log_returns_2025 = log_returns['2025-01-01':'2025-12-31']
+
+corr_matrix_2025 = log_returns_2025.corr()
+adjacency_2025 = corr_matrix_2025.abs().to_numpy().copy()
+np.fill_diagonal(adjacency_2025, 0)
+
+_, eigenvector_2025 = power_method(adjacency_2025)
+centrality_2025 = pd.Series(eigenvector_2025, index=log_returns_2025.columns, name='centrality')
+
+print("\nTop 10 most central stocks (2025):")
+print(centrality_2025.sort_values(ascending=False).head(10))
+
+print("\nMag 7 Centrality Rankings (2025):")
+print(centrality_2025[mag7].sort_values(ascending=False))
+
+print(f"\nMag 7 centrality ranks out of {len(centrality_2025)} stocks (2025):")
+ranked_2025 = centrality_2025.rank(ascending=False)
+print(ranked_2025[mag7].sort_values())
+
+# Time window analysis
+windows = {
+    'Pre-COVID (2019)': ('2019-01-01', '2019-12-31'),
+    'COVID Crash (2020 Q1)': ('2020-01-01', '2020-06-30'),
+    'Recovery (2020 Q3-Q4)': ('2020-07-01', '2020-12-31'),
+    'Bull Market (2021)': ('2021-01-01', '2021-12-31'),
+    'Rate Hikes (2022)': ('2022-01-01', '2022-12-31'),
+    'AI Boom (2023-2024)': ('2023-01-01', '2024-12-31'),
+    '2025': ('2025-01-01', '2025-12-31')
+}
+
+mag7 = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA']
+
+window_ranks = {}
+
+for label, (start, end) in windows.items():
+    window_returns = log_returns[start:end]
+    
+    # Skip if not enough data
+    if len(window_returns) < 30:
+        print(f"Skipping {label} — not enough data")
+        continue
+    
+    # Only use tickers available in this window
+    valid_tickers = window_returns.dropna(axis=1, thresh=int(0.8 * len(window_returns))).columns
+    window_returns = window_returns[valid_tickers].dropna()
+    
+    # Build adjacency and compute centrality
+    adj = window_returns.corr().abs().to_numpy().copy()
+    np.fill_diagonal(adj, 0)
+    _, eigvec = power_method(adj)
+    centrality_window = pd.Series(eigvec, index=valid_tickers)
+    
+    # Store mag 7 ranks (only ones available in this window)
+    ranked = centrality_window.rank(ascending=False)
+    available_mag7 = [t for t in mag7 if t in ranked.index]
+    window_ranks[label] = ranked[available_mag7]
+
+# Build comparison DataFrame
+rank_df = pd.DataFrame(window_ranks).T
+print("\nMag 7 Centrality Ranks Across Time Windows:")
+print(rank_df)
+
+# Plot
+plt.figure(figsize=(14, 7))
+for ticker in mag7:
+    if ticker in rank_df.columns:
+        plt.plot(rank_df.index, rank_df[ticker], marker='o', label=ticker)
+
+plt.gca().invert_yaxis()  # Lower rank = more central, so invert so "better" is higher
+plt.title("Mag 7 Centrality Rank Over Time\n(Lower = More Central)", fontsize=14, fontweight='bold')
+plt.ylabel("Centrality Rank")
+plt.xlabel("Time Period")
+plt.xticks(rotation=45, ha='right')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('mag7_centrality_over_time.png', dpi=300)
+print("Saved: mag7_centrality_over_time.png")
+plt.close()
+
+# Market cap weight of Mag 7 vs rest of S&P 500
+mag7_info = {}
+for ticker in mag7:
+    try:
+        mag7_info[ticker] = yf.Ticker(ticker).info.get('marketCap', np.nan)
+    except:
+        mag7_info[ticker] = np.nan
+
+mag7_caps = pd.Series(mag7_info)
+
+# Get all S&P 500 market caps
+all_caps = {}
+for ticker in log_returns.columns:
+    try:
+        all_caps[ticker] = yf.Ticker(ticker).info.get('marketCap', np.nan)
+    except:
+        all_caps[ticker] = np.nan
+
+all_caps_series = pd.Series(all_caps)
+
+mag7_total = mag7_caps.sum()
+sp500_total = all_caps_series.sum()
+others_total = sp500_total - mag7_total
+
+plt.figure(figsize=(8, 8))
+plt.pie(
+    [mag7_total, others_total],
+    labels=['Mag 7', 'Rest of S&P 500'],
+    autopct='%1.1f%%',
+    colors=['#e74c3c', '#3498db'],
+    startangle=90
+)
+plt.title('Mag 7 vs Rest of S&P 500 — Market Cap Weight', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.savefig('mag7_marketcap_weight.png', dpi=300)
+print("Saved: mag7_marketcap_weight.png")
+plt.close()
+
+# Correlation of each Mag 7 stock with the equal-weighted market return
+market_return = log_returns.mean(axis=1)  # proxy for market
+
+mag7_market_corr = {}
+for ticker in mag7:
+    if ticker in log_returns.columns:
+        mag7_market_corr[ticker] = log_returns[ticker].corr(market_return)
+
+# Do the same for all stocks
+all_market_corr = log_returns.corrwith(market_return)
+
+mag7_corr_series = pd.Series(mag7_market_corr)
+
+plt.figure(figsize=(10, 5))
+plt.hist(all_market_corr, bins=50, alpha=0.6, label='All S&P 500 stocks', color='steelblue')
+for ticker, corr in mag7_corr_series.items():
+    plt.axvline(x=corr, linestyle='--', linewidth=2, label=f'{ticker} ({corr:.2f})')
+plt.xlabel('Correlation with Market Return')
+plt.ylabel('Frequency')
+plt.title('Individual Stock Correlation with Market\nMag 7 Highlighted', fontsize=14, fontweight='bold')
+plt.legend(fontsize=8)
+plt.tight_layout()
+plt.savefig('mag7_market_correlation.png', dpi=300)
+print("Saved: mag7_market_correlation.png")
+plt.close()
+
+# Build a comparison table
+cap_rank = all_caps_series.rank(ascending=False)
+cent_rank = centrality_series.rank(ascending=False)
+
+comparison = pd.DataFrame({
+    'Market Cap Rank': cap_rank[mag7],
+    'Centrality Rank': cent_rank[mag7]
+}).sort_values('Market Cap Rank')
+
+print("\nMag 7 — Market Cap Rank vs Centrality Rank:")
+print(comparison)
+
+# Scatter plot for all stocks
+common = all_caps_series.dropna().index.intersection(centrality_series.index)
+plt.figure(figsize=(10, 7))
+plt.scatter(
+    np.log(all_caps_series[common]),
+    centrality_series[common],
+    alpha=0.3, color='steelblue', label='All stocks'
+)
+for ticker in mag7:
+    if ticker in common:
+        plt.scatter(
+            np.log(all_caps_series[ticker]),
+            centrality_series[ticker],
+            color='red', s=100, zorder=5
+        )
+        plt.annotate(ticker,
+            (np.log(all_caps_series[ticker]), centrality_series[ticker]),
+            textcoords='offset points', xytext=(5, 5), fontsize=9
+        )
+plt.xlabel('Log Market Cap')
+plt.ylabel('Eigenvector Centrality')
+plt.title('Market Cap vs Network Centrality\nMag 7 Highlighted in Red', fontsize=14, fontweight='bold')
+plt.legend()
+plt.tight_layout()
+plt.savefig('marketcap_vs_centrality.png', dpi=300)
+print("Saved: marketcap_vs_centrality.png")
+plt.close()
+
+
+#Step 7
+
+# 1. Convert centrality series to DataFrame with ticker column
+centrality_df = centrality_series.reset_index()
+centrality_df.columns = ['Symbol', 'centrality']
+
+# 2. Join with sectors on Symbol
+centrality_df = centrality_df.join(sectors, on='Symbol')
+
+# 3. Group by sector, take mean, sort
+sector_centrality = centrality_df.groupby('GICS Sector')['centrality'].mean().sort_values(ascending=False)
+
+# 4. Print and plot
+
+print(sector_centrality)
+
+#Step 8 Linear Regression Analysis
+
+
+# 1. Fetch market caps
+market_caps = {}
+for i, ticker in enumerate(centrality_df['Symbol']):
+    if i % 50 == 0:
+        print(f"Fetching {i}/{len(centrality_df)}...")
+    try:
+        market_caps[ticker] = yf.Ticker(ticker).info.get('marketCap', np.nan)
+    except:
+        market_caps[ticker] = np.nan
+
+# 2. Add market cap and volatility to centrality_df
+centrality_df['market_cap'] = centrality_df['Symbol'].map(market_caps)
+centrality_df['volatility'] = log_returns.std().values
+
+# 3. Drop missing values
+reg_df = centrality_df.dropna()
+
+# 4. Build X and y
+# X = market cap, volatility, sector dummies
+# y = centrality
+X = pd.get_dummies(reg_df[['market_cap', 'volatility', 'GICS Sector']], drop_first=True)
+y = reg_df['centrality']
+
+X_scaled = StandardScaler().fit_transform(X)
+model = LinearRegression().fit(X_scaled, y)
+
+# 6. Results
+print(f"R²: {model.score(X_scaled, y):.4f}")
+coef_df = pd.Series(model.coef_, index=X.columns).sort_values()
+print(coef_df)
+
+plt.figure(figsize=(12, 7))
+colors = ['#e74c3c' if x > 0 else '#3498db' for x in coef_df.values]
+coef_df.plot(kind='barh', color=colors)
+
+plt.axvline(x=0, color='black', linewidth=1.5, linestyle='--')
+plt.xlabel('Coefficient (Standardized)', fontsize=12)
+plt.title('Regression Coefficients — What Drives Network Centrality?\n(Red = More Central, Blue = Less Central)', 
+          fontsize=13, fontweight='bold')
+plt.tight_layout()
+plt.savefig('regression_coefficients.png', dpi=300)
+print("Saved: regression_coefficients.png")
+plt.close()
